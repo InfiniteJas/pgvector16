@@ -3,7 +3,9 @@
 **Автор:** Olzhas Alseitov
 
 Telegram: @olzhasAl
+
 LinkedIn: [olzhas-alseitov](https://www.linkedin.com/in/olzhas-alseitov/)
+
 GitHub: [InfiniteJas](https://github.com/InfiniteJas/)
 
 ## Описание: Что делает этот скрипт?
