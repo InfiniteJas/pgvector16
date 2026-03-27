@@ -1,87 +1,38 @@
-# PostgreSQL 16 + pgvector — Provisioning Script
+# PostgreSQL 16 + pgvector — Развертывание для ИИ-агентов (RAG/LLM)
 
-**Author:** Olzhas Alseitov
+**Автор:** Олжас Алсеитов
 
-## Overview
-This repository contains a one-shot provisioning script to install **PostgreSQL 16** and the **pgvector** extension on RHEL/CentOS (EL8). It applies conservative, production-friendly tuning aimed at LLM/RAG/vector-search workloads, enables **SCRAM-SHA-256** authentication, and prints ready-to-use connection credentials for an application database/user.
+## Описание: Что делает этот скрипт?
+Этот проект содержит production-ready shell-скрипт (написанный с соблюдением стандартов Google Shell Style Guide) для полностью автоматизированного развертывания **PostgreSQL 16** с расширением **pgvector** на базе RHEL/CentOS 8. 
 
-## What the script does
-1. Adds the official PostgreSQL YUM repository and installs `postgresql16-server`, `postgresql16-contrib`, and `pgvector_16`.
-2. Initializes a new PostgreSQL 16 cluster and enables the service on boot.
-3. Computes tuning parameters from detected RAM/CPU and writes an optimized `postgresql.conf`.
-4. Enables external access with **SCRAM** in `pg_hba.conf` (warning: default allows `0.0.0.0/0`).
-5. Creates an application user/database and enables the `vector` extension.
-6. Prints connection details with a randomly generated strong password.
+Скрипт решает следующие задачи:
+1. Автоматически скачивает и устанавливает ядро БД, векторное расширение и Enterprise-модули безопасности (`credcheck`, `auth_delay`).
+2. Динамически вычисляет ресурсы сервера (объем RAM, количество ядер CPU) и на лету генерирует оптимизированный `postgresql.conf`.
+3. Настраивает строгую аутентификацию по протоколу SCRAM-SHA-256.
+4. Создает изолированную базу данных, application-пользователя с криптографически стойким паролем (24 символа) и активирует векторные индексы.
 
-## Supported platform
-- RHEL 8 / CentOS Stream 8 (EL8)
+## Суть проекта и почему именно такой подход
+Построение надежных ИИ-агентов и систем RAG (Retrieval-Augmented Generation) требует совершенно иного подхода к базе данных. Стандартный PostgreSQL "из коробки" не готов к тяжелым математическим операциям и массовым запросам на поиск векторного сходства. 
 
-> **Note:** The provided repository URL targets EL8. For EL9, use the appropriate pgdg release URL or adjust the script accordingly.
+Данный скрипт создает эталонный инфраструктурный фундамент. Он идеально подходит для построения защищенных сред при развертывании и дообучении LLM в изолированных (air-gapped) контурах. Скрипт изначально спроектирован так, чтобы база данных выдерживала жесткое нагрузочное тестирование инструментами вроде k6 или JMeter, эффективно утилизируя память без риска падения с OOM (Out of Memory).
 
-## Defaults
-- **DB user:** `webui_user`
-- **DB name:** `open_webui_db`
-- **Auth:** `password_encryption = scram-sha-256`
-- **Logging:** `log_min_duration_statement = 1000ms`, `pg_stat_statements` preloaded
-- **Tuning:** `shared_buffers ≈ 25% RAM (min 1GB)`, `effective_cache_size ≈ 75% RAM`, moderate parallelism, conservative `work_mem`/`maintenance_work_mem`
+## Обоснование параметров конфигурации (Тюнинг)
+При настройке PostgreSQL под векторные вычисления (эмбеддинги) недостаточно просто "накинуть памяти". Векторные индексы HNSW или IVFFlat критически требовательны к RAM во время их создания и обхода. 
 
-You can adjust `DB_USER` and `DB_NAME` at the top of `setup_pg.sh` before running it.
+Настройки в скрипте опираются на рекомендации официальной документации pgvector и фундаментальные статьи по тюнингу БД, в частности — [«Optimize PostgreSQL Server Performance Through Configuration» от инженеров Crunchy Data](https://www.crunchydata.com/blog/optimize-postgresql-server-performance). 
 
-## Quick start
+Ключевые параметры, которые динамически высчитывает скрипт:
+
+* **`shared_buffers` (25% от RAM):** Как отмечается в рекомендациях Crunchy Data, Postgres использует архитектуру двойного буферизирования (свой кэш + кэш ОС). Выделение ровно 25% гарантирует, что база данных сможет держать кэшированные эмбеддинги в быстрой памяти, оставляя ОС достаточно места (до 75%) для её собственного кэша, что ускоряет чтение файлов.
+* **`maintenance_work_mem` (Динамический расчет):** Этот параметр *критически важен* для pgvector. Создание HNSW-индексов на массивных датасетах требует колоссального объема памяти. Дефолтные 64MB приведут к тому, что база начнет постоянно сбрасывать временные данные на медленный диск. Скрипт выделяет значительный объем памяти специально под задачи построения индексов и `VACUUM`.
+* **`work_mem` (Пропорционально RAM):** Объем памяти, выделяемый под каждую операцию сортировки или хэширования внутри одного запроса. Оптимизированное значение спасает от медленных сортировок на диске при параллельном поиске (k-NN), не доводя сервер до исчерпания памяти при пиковых нагрузках.
+* **Специфичный тюнинг воркеров (`max_parallel_workers`):** pgvector способен распараллеливать процесс сборки индексов. Скрипт связывает количество background-воркеров напрямую с числом ядер процессора, чтобы максимизировать утилизацию железа.
+
+## Быстрый старт
 ```bash
-# 1) Copy the script to the target EL8 host
-# 2) Review and (optionally) edit DB_USER / DB_NAME in the header
+# 1. Скопируйте скрипт на целевой сервер (RHEL/CentOS 8)
+# 2. Выдайте права на исполнение
 chmod +x setup_pg_en.sh
+
+# 3. Запустите скрипт
 sudo ./setup_pg_en.sh
-```
-The script will output connection information at the end. Save the password immediately.
-
-## Security hardening (strongly recommended)
-1. **Restrict network access**: Replace `0.0.0.0/0` in `pg_hba.conf` with your app server's CIDR (e.g., `203.0.113.10/32`).
-2. **Firewall**: Allow TCP/5432 only from trusted sources (for example, using `firewalld` or security groups).
-3. **OS updates**: Keep OS and PostgreSQL minor versions up to date.
-4. **Backups**: Establish regular base backups and WAL archiving.
-5. **Least privilege**: Use the generated app user; avoid superuser for applications.
-
-## Verifying the installation
-```bash
-# Service
-sudo systemctl status postgresql-16
-
-# Connect as postgres
-sudo -u postgres psql -c 'SELECT version();'
-
-# Check pgvector in your app DB
-sudo -u postgres psql -d open_webui_db -c 'CREATE EXTENSION IF NOT EXISTS vector; \dx'
-```
-
-## Tuning notes
-- The provided defaults are safe starting points. For large deployments, profile real workloads using `pg_stat_statements` and OS/DB metrics, then iterate.
-- `work_mem` is per sort/hash operation. Increasing it aggressively for many concurrent connections can exhaust RAM.
-- If you expect high ingress/updates, consider increasing `autovacuum_max_workers` and monitoring autovacuum lag.
-
-## Troubleshooting
-- **Repo not found / EL version mismatch**: Ensure the pgdg repo matches your OS (EL8 vs EL9).
-- **Port 5432 blocked**: Open the port on the host firewall/security group or connect over an internal network.
-- **Password not saved**: If you lose the printed password, reset it:
-  ```bash
-  sudo -u postgres psql -c "ALTER USER webui_user WITH PASSWORD 'New_Strong_Pass_123';"
-  ```
-- **pgvector missing**: Confirm the `pgvector_16` package was installed and `CREATE EXTENSION vector;` succeeds in the target DB.
-
-## Uninstall / cleanup
-```bash
-# Stop and disable
-sudo systemctl disable --now postgresql-16
-
-# Remove packages (keeps data dir unless removed explicitly)
-sudo dnf remove -y postgresql16-server postgresql16-contrib pgvector_16
-
-# (Optional) remove data directory—this deletes ALL databases
-sudo rm -rf /var/lib/pgsql/16
-```
-
-## Contributing / style
-- Keep comments concise and actionable.
-- Prefer readable defaults with clear rationale.
-- Log key actions with explicit, user-friendly messages.
