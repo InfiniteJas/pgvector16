@@ -1,6 +1,10 @@
 # PostgreSQL 16 + pgvector — Развертывание для ИИ-агентов (RAG/LLM)
 
-**Автор:** Олжас Алсеитов
+**Автор:** Olzhas Alseitov
+
+Telegram: @olzhasAl
+LinkedIn: [olzhas-alseitov](https://www.linkedin.com/in/olzhas-alseitov/)
+GitHub: [InfiniteJas](https://github.com/InfiniteJas/)
 
 ## Описание: Что делает этот скрипт?
 Этот проект содержит production-ready shell-скрипт (написанный с соблюдением стандартов Google Shell Style Guide) для полностью автоматизированного развертывания **PostgreSQL 16** с расширением **pgvector** на базе RHEL/CentOS 8. 
